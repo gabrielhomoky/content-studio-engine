@@ -9,6 +9,8 @@ from unittest import mock
 from tests import _path  # noqa: F401
 import media
 
+SPEECH = "This lilac hallway was the riskiest colour decision of the whole project."
+
 
 class CommandTest(unittest.TestCase):
     def test_keyframe_times(self):
@@ -78,9 +80,9 @@ class ProcessTest(unittest.TestCase):
              mock.patch("media.extract_frames", side_effect=fake_frames), \
              mock.patch("media.extract_audio", side_effect=fake_audio), \
              mock.patch("media.ce.call_bytes_in",
-                        return_value={"text": "hello", "language": "en"}):
+                        return_value={"text": SPEECH, "language": "en"}):
             m = media.process_post(post, Path(tmp), lang="en")
-            self.assertEqual(m["transcript"], "hello")
+            self.assertEqual(m["transcript"], SPEECH)
             self.assertEqual(m["media_keys"], ["frames/R2/01.jpg"])
             self.assertFalse(Path(tmp, "R2", "video.mp4").exists())
 

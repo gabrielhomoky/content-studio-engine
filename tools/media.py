@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,32 @@ FRAME_EVERY = 3.0
 MAX_FRAMES = 6
 FRAME_WIDTH = 720
 MAX_SLIDES = 10
+POST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+MIN_SPEECH_CHARS = 40
+# Whisper invents these on music-only or silent audio.
+HALLUCINATIONS = ("thank you", "thanks for watching", "subscribe", "you", "music", "дякую",
+                  "спасибо", "продолжение следует", "gracias")
+
+
+def safe_post_id(raw: Any) -> str:
+    """Scraped ids become directory names: allow only a conservative shortcode alphabet."""
+    post_id = str(raw or "")
+    if not POST_ID_RE.match(post_id) or post_id in {".", ".."}:
+        raise ValueError(f"unsafe post id: {post_id[:40]!r}")
+    return post_id
+
+
+def clean_transcript(text: str | None) -> str | None:
+    """Return None for music-only / no-speech audio (too short or a known Whisper hallucination)."""
+    t = (text or "").strip()
+    if len(t) < MIN_SPEECH_CHARS:
+        return None
+    core = re.sub(r"[^\w\s]", " ", t.lower())
+    words = set(core.split())
+    phrases = [h for h in HALLUCINATIONS if h in core]
+    if phrases and len(words) <= 8:
+        return None
+    return t
 
 
 def keyframe_times(duration: float | None, first: float = FIRST_FRAME_AT,
@@ -134,8 +161,11 @@ def process_reel(post: dict[str, Any], workdir: Path, manifest: dict[str, Any],
         if audio:
             result = step(errors, "transcribe", transcribe_file, audio, lang)
             if isinstance(result, dict):
-                manifest["transcript"] = result.get("text") or ""
+                text = clean_transcript(result.get("text"))
+                manifest["transcript"] = text
                 manifest["language"] = result.get("language")
+                if text is None:
+                    manifest["speech"] = "music only / no speech"
     step(errors, "cleanup", video.unlink)
     return frames
 
@@ -159,7 +189,7 @@ def process_slides(post: dict[str, Any], workdir: Path, manifest: dict[str, Any]
 def process_post(post: dict[str, Any], out: Path, *, upload_media: bool = True,
                  transcribe: bool = True, lang: str = "auto",
                  max_slides: int = MAX_SLIDES) -> dict[str, Any]:
-    post_id = str(post.get("id"))
+    post_id = safe_post_id(post.get("id"))
     workdir = out / post_id
     workdir.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, Any] = {"id": post_id, "type": post.get("type"), "files": [],
@@ -208,6 +238,11 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out)
     summary = {}
     for post in posts:
+        try:
+            safe_post_id(post.get("id"))
+        except ValueError as exc:
+            print(f"media.py: skipped: {exc}", file=sys.stderr)
+            continue
         manifest = process_post(post, out, upload_media=not args.no_upload,
                                 transcribe=not args.no_transcribe, lang=args.lang,
                                 max_slides=args.max_slides)
