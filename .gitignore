@@ -1,0 +1,9 @@
+work/
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+.env
+.env.*
+*.mp4
+*.mp3
